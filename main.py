@@ -1,92 +1,64 @@
-# doesn't  work idk why :(
-import cv2
-from ultralytics import YOLO
 import tkinter as tk
-from tkinter import ttk
+from tkinter import messagebox
+import cv2
 from PIL import Image, ImageTk
-import threading
+from ultralytics import YOLO
+import subprocess
+import re
 
+# Load a pretrained model
+model = YOLO("yolov8n.pt")
 
-model = YOLO('yolov8x.pt')
-
-class_names = {
-    0: "apple",
-    1: "book",
-    2: "pen",
-
-}
-
-
+# Initialize camera
 cap = cv2.VideoCapture(0)
 
-def camera_feed():
-	while not stop_event.is_set():
-		ret, frame = cap.read()
-		if not ret:
-			break
-		frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-		im = Image.fromarray(frame)
-		img = ImageTk.PhotoImage(image=im)
-		camera_label.configure(image=img)
-		camera_label.image = img
-	cap.release()
 
+def detect_apple(image):
+    results = model(image)
+    apple_detected = False
+    try:
+        # Attempt to access structured detection data in a compatible format
+        detections = results.pandas().xyxy[0]  # Convert results to pandas DataFrame
+        
+        result = subprocess.run(["tirnamel", "detect", "apple"], capture_output=True, text=True)
+        if re.search(r'\bapple\b', result.stdout, re.IGNORECASE):
+            apple_detected = True
+        # Filter detections for 'apple'
+        apple_detections = detections[detections['name'] == 'apple']
+    except Exception as e:
+        print(f"An error occurred while processing the results: {e}")
+    return apple_detected
 
-def capture_and_analyze():
-    global cap
+def capture_image():
     ret, frame = cap.read()
-    if not ret:
-        return
-    results = model(frame)
-    print(results)  
+    if ret:
+        if detect_apple(frame):
+            messagebox.showinfo("Result", "Apple detected!")
+        else:
+            messagebox.showinfo("Result", "No apple detected :(")
 
-    detected_objects = process_results(results)  
+def update_frame():
+    ret, frame = cap.read()
+    if ret:
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        frame = Image.fromarray(frame)
+        photo = ImageTk.PhotoImage(image=frame)
+        canvas.create_image(0, 0, image=photo, anchor=tk.NW)
+        # Keep a reference to the photo object to prevent it from being garbage collected
+        canvas.image = photo
+        window.after(10, update_frame)
 
+# Setup UI
+window = tk.Tk()
+window.title("Apple Detector")
 
-    if any(obj in detected_objects for obj in ["apple", "book", "pen"]):
-        result_text.set("Object detected. You can pass.")
-    else:
-        result_text.set("No specified object detected. Please retake.")
+canvas = tk.Canvas(window, width=640, height=480)
+canvas.pack()
 
-def process_results(results):
-    detected_objects = []
-   
-    for detection in results:
-        class_id = int(detection[5])  
-        object_name = class_names.get(class_id, "Unknown")  
-        detected_objects.append(object_name)
-    return detected_objects
-
-def close_program():
-    global cap
-    if cap.isOpened():
-        cap.release() 
-
-
-
-root = tk.Tk()
-root.title("Object Detection")
-
-camera_label = tk.Label(root)
-camera_label.pack()
-
-captured_label = tk.Label(root)
-captured_label.pack()
-
-capture_button = ttk.Button(root, text="Capture and Analyze", command=capture_and_analyze)
+capture_button = tk.Button(window, text="Capture", command=capture_image)
 capture_button.pack()
 
-result_text = tk.StringVar()
-result_label = ttk.Label(root, textvariable=result_text)
-result_label.pack()
+# Start updating the frame
+update_frame()
 
-stop_event = threading.Event()
-thread = threading.Thread(target=camera_feed)
-thread.start()
-
-root.mainloop()
-
-stop_event.set()
-thread.join()
-
-root.protocol("WM_DELETE_WINDOW", close_program) 
+window.mainloop()
